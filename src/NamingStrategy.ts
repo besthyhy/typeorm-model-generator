@@ -1,4 +1,5 @@
 import changeCase = require("change-case");
+import _ = require("lodash");
 import { AbstractNamingStrategy } from "./AbstractNamingStrategy";
 import { EntityInfo } from "./models/EntityInfo";
 import { RelationInfo } from "./models/RelationInfo";
@@ -61,7 +62,10 @@ export class NamingStrategy extends AbstractNamingStrategy {
     }
 
     public entityName(entityName: string): string {
-        return entityName;
+        const pascalStyleName =
+            _(_(entityName).camelCase()).upperFirst() + "Entity";
+
+        return pascalStyleName;
     }
 
     public columnName(columnName: string): string {
