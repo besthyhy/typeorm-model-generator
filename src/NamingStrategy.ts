@@ -2,6 +2,7 @@ import { plural } from "pluralize";
 import * as changeCase from "change-case";
 import { Relation } from "./models/Relation";
 import { RelationId } from "./models/RelationId";
+import _ = require("lodash");
 
 let pluralize: boolean;
 
@@ -66,15 +67,8 @@ export function relationName(relation: Relation): string {
     return newColumnName;
 }
 
-// export function entityName(oldEntityName: string): string {
-//     return oldEntityName;
-// }
-
 export function entityName(oldEntityName: string): string {
-    const pascalStyleName =
-        _(_(entityName).camelCase()).upperFirst() + "Entity";
-
-    return pascalStyleName;
+    return oldEntityName + "Entity";
 }
 
 export function columnName(oldColumnName: string): string {

@@ -40,7 +40,8 @@
     "typeorm": "^0.2.22",
     "typescript": "^3.7.4",
     "yargs": "^15.1.0",
-    "yn": "^3.1.1"
+    "yn": "^3.1.1",
+    "lodash": "^4.17.11"
   },
   "devDependencies": {
     "@types/array.prototype.flatmap": "^1.2.0",
@@ -83,7 +84,8 @@
     "rimraf": "^3.0.0",
     "sinon": "^7.5.0",
     "sinon-chai": "^3.4.0",
-    "ts-node": "^8.5.4"
+    "ts-node": "^8.5.4",
+    "@types/lodash": "^4.14.134"
   },
   "husky": {
     "hooks": {
