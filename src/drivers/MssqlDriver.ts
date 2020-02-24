@@ -2,46 +2,60 @@ import * as MSSQL from "mssql";
 import { ConnectionOptions } from "typeorm";
 import * as TypeormDriver from "typeorm/driver/sqlserver/SqlServerDriver";
 import { DataTypeDefaults } from "typeorm/driver/types/DataTypeDefaults";
-import { IConnectionOptions } from "../IConnectionOptions";
-import { ColumnInfo } from "../models/ColumnInfo";
-import { EntityInfo } from "../models/EntityInfo";
-import { IndexColumnInfo } from "../models/IndexColumnInfo";
-import { IndexInfo } from "../models/IndexInfo";
-import { IRelationTempInfo } from "../models/RelationTempInfo";
 import * as TomgUtils from "../Utils";
-import { AbstractDriver } from "./AbstractDriver";
+import AbstractDriver from "./AbstractDriver";
+import IConnectionOptions from "../IConnectionOptions";
+import { Entity } from "../models/Entity";
+import { Column } from "../models/Column";
+import { Index } from "../models/Index";
+import IGenerationOptions from "../IGenerationOptions";
+import { RelationInternal } from "../models/RelationInternal";
 
-export class MssqlDriver extends AbstractDriver {
+export default class MssqlDriver extends AbstractDriver {
     public defaultValues: DataTypeDefaults = new TypeormDriver.SqlServerDriver({
         options: { replication: undefined } as ConnectionOptions
     } as any).dataTypeDefaults;
+
     public readonly standardPort = 1433;
+
     public readonly standardSchema = "dbo";
+
     public readonly standardUser = "sa";
 
     private Connection: MSSQL.ConnectionPool;
-    public GetAllTablesQuery = async (schema: string, dbNames: string) => {
+
+    public GetAllTablesQuery = async (
+        schema: string,
+        dbNames: string,
+        tableNames: string[]
+    ) => {
         const request = new MSSQL.Request(this.Connection);
-        const response: Array<{
+        const tableCondition =
+            tableNames.length > 0
+                ? ` AND NOT TABLE_NAME IN ('${tableNames.join("','")}')`
+                : "";
+        const response: {
             TABLE_SCHEMA: string;
             TABLE_NAME: string;
             DB_NAME: string;
-        }> = (await request.query(
-            `SELECT TABLE_SCHEMA,TABLE_NAME, table_catalog as "DB_NAME" FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_TYPE='BASE TABLE' and TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG in (${this.escapeCommaSeparatedList(
-                dbNames
-            )})`
-        )).recordset;
+        }[] = (
+            await request.query(
+                `SELECT TABLE_SCHEMA,TABLE_NAME, table_catalog as "DB_NAME" FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE='BASE TABLE' and TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG in (${MssqlDriver.escapeCommaSeparatedList(
+                    dbNames
+                )}) ${tableCondition}`
+            )
+        ).recordset;
         return response;
     };
 
     public async GetCoulmnsFromEntity(
-        entities: EntityInfo[],
+        entities: Entity[],
         schema: string,
         dbNames: string
-    ): Promise<EntityInfo[]> {
+    ): Promise<Entity[]> {
         const request = new MSSQL.Request(this.Connection);
-        const response: Array<{
+        const response: {
             TABLE_NAME: string;
             COLUMN_NAME: string;
             COLUMN_DEFAULT: string;
@@ -52,254 +66,266 @@ WHERE TABLE_TYPE='BASE TABLE' and TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG 
             NUMERIC_SCALE: number;
             IsIdentity: number;
             IsUnique: number;
-        }> = (await request.query(`SELECT TABLE_NAME,COLUMN_NAME,COLUMN_DEFAULT,IS_NULLABLE,
-   DATA_TYPE,CHARACTER_MAXIMUM_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE,
-   COLUMNPROPERTY(object_id(TABLE_NAME), COLUMN_NAME, 'IsIdentity') IsIdentity,
-   (SELECT count(*)
-    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-        inner join INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE cu
-            on cu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
-    where
-        tc.CONSTRAINT_TYPE = 'UNIQUE'
-        and tc.TABLE_NAME = c.TABLE_NAME
-        and cu.COLUMN_NAME = c.COLUMN_NAME
-        and tc.TABLE_SCHEMA=c.TABLE_SCHEMA) IsUnique
-   FROM INFORMATION_SCHEMA.COLUMNS c
-   where TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG in (${this.escapeCommaSeparatedList(
-            dbNames
-        )})
-        order by ordinal_position`)).recordset;
+        }[] = (
+            await request.query(`SELECT TABLE_NAME,COLUMN_NAME,COLUMN_DEFAULT,IS_NULLABLE,
+        DATA_TYPE,CHARACTER_MAXIMUM_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE,
+        COLUMNPROPERTY(object_id(TABLE_NAME), COLUMN_NAME, 'IsIdentity') IsIdentity,
+        (SELECT count(*)
+         FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+             inner join INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE cu
+                 on cu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+         where
+             tc.CONSTRAINT_TYPE = 'UNIQUE'
+             and tc.TABLE_NAME = c.TABLE_NAME
+             and cu.COLUMN_NAME = c.COLUMN_NAME
+             and tc.TABLE_SCHEMA=c.TABLE_SCHEMA) IsUnique
+        FROM INFORMATION_SCHEMA.COLUMNS c
+        where TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG in (${MssqlDriver.escapeCommaSeparatedList(
+                dbNames
+            )})
+             order by ordinal_position`)
+        ).recordset;
         entities.forEach(ent => {
             response
                 .filter(filterVal => {
-                    return filterVal.TABLE_NAME === ent.tsEntityName;
+                    return filterVal.TABLE_NAME === ent.tscName;
                 })
                 .forEach(resp => {
-                    const colInfo: ColumnInfo = new ColumnInfo();
-                    colInfo.tsName = resp.COLUMN_NAME;
-                    colInfo.options.name = resp.COLUMN_NAME;
-                    colInfo.options.nullable = resp.IS_NULLABLE === "YES";
-                    colInfo.options.generated = resp.IsIdentity === 1;
-                    colInfo.options.unique = resp.IsUnique === 1;
-                    colInfo.options.default = this.ReturnDefaultValueFunction(
+                    const tscName = resp.COLUMN_NAME;
+                    const options: Column["options"] = {
+                        name: resp.COLUMN_NAME
+                    };
+                    if (resp.IS_NULLABLE === "YES") options.nullable = true;
+                    if (resp.IsUnique === 1) options.unique = true;
+                    const generated = resp.IsIdentity === 1 ? true : undefined;
+                    const defaultValue = MssqlDriver.ReturnDefaultValueFunction(
                         resp.COLUMN_DEFAULT
                     );
-                    colInfo.options.type = resp.DATA_TYPE as any;
+                    const columnType = resp.DATA_TYPE;
+                    let tscType = "";
                     switch (resp.DATA_TYPE) {
                         case "bigint":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "bit":
-                            colInfo.tsType = "boolean";
+                            tscType = "boolean";
                             break;
                         case "decimal":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "int":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "money":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "numeric":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "smallint":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "smallmoney":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "tinyint":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "float":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "real":
-                            colInfo.tsType = "number";
+                            tscType = "number";
                             break;
                         case "date":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "datetime2":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "datetime":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "datetimeoffset":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "smalldatetime":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "time":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "char":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "text":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "varchar":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "nchar":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "ntext":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "nvarchar":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "binary":
-                            colInfo.tsType = "Buffer";
+                            tscType = "Buffer";
                             break;
                         case "image":
-                            colInfo.tsType = "Buffer";
+                            tscType = "Buffer";
                             break;
                         case "varbinary":
-                            colInfo.tsType = "Buffer";
+                            tscType = "Buffer";
                             break;
                         case "hierarchyid":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "sql_variant":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "timestamp":
-                            colInfo.tsType = "Date";
+                            tscType = "Date";
                             break;
                         case "uniqueidentifier":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "xml":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "geometry":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         case "geography":
-                            colInfo.tsType = "string";
+                            tscType = "string";
                             break;
                         default:
+                            tscType = "NonNullable<unknown>";
                             TomgUtils.LogError(
-                                `Unknown column type: ${
-                                    resp.DATA_TYPE
-                                }  table name: ${
-                                    resp.TABLE_NAME
-                                } column name: ${resp.COLUMN_NAME}`
+                                `Unknown column type: ${resp.DATA_TYPE}  table name: ${resp.TABLE_NAME} column name: ${resp.COLUMN_NAME}`
                             );
                             break;
                     }
 
                     if (
                         this.ColumnTypesWithPrecision.some(
-                            v => v === colInfo.options.type
+                            v => v === columnType
                         )
                     ) {
-                        colInfo.options.precision = resp.NUMERIC_PRECISION;
-                        colInfo.options.scale = resp.NUMERIC_SCALE;
+                        if (resp.NUMERIC_PRECISION !== null) {
+                            options.precision = resp.NUMERIC_PRECISION;
+                        }
+                        if (resp.NUMERIC_SCALE !== null) {
+                            options.scale = resp.NUMERIC_SCALE;
+                        }
                     }
                     if (
-                        this.ColumnTypesWithLength.some(
-                            v => v === colInfo.options.type
-                        )
+                        this.ColumnTypesWithLength.some(v => v === columnType)
                     ) {
-                        colInfo.options.length =
+                        options.length =
                             resp.CHARACTER_MAXIMUM_LENGTH > 0
                                 ? resp.CHARACTER_MAXIMUM_LENGTH
                                 : undefined;
                     }
-
-                    if (colInfo.options.type) {
-                        ent.Columns.push(colInfo);
-                    }
+                    ent.columns.push({
+                        generated,
+                        type: columnType,
+                        default: defaultValue,
+                        options,
+                        tscName,
+                        tscType
+                    });
                 });
         });
         return entities;
     }
+
     public async GetIndexesFromEntity(
-        entities: EntityInfo[],
+        entities: Entity[],
         schema: string,
         dbNames: string
-    ): Promise<EntityInfo[]> {
+    ): Promise<Entity[]> {
         const request = new MSSQL.Request(this.Connection);
-        const response: Array<{
+        const response: {
             TableName: string;
             IndexName: string;
             ColumnName: string;
             is_unique: boolean;
             is_primary_key: boolean;
-        }> = [];
-        for (const dbName of dbNames.split(",")) {
-            await this.UseDB(dbName);
-            const resp: Array<{
-                TableName: string;
-                IndexName: string;
-                ColumnName: string;
-                is_unique: boolean;
-                is_primary_key: boolean;
-            }> = (await request.query(`SELECT
-         TableName = t.name,
-         IndexName = ind.name,
-         ColumnName = col.name,
-         ind.is_unique,
-         ind.is_primary_key
-    FROM
-         sys.indexes ind
-    INNER JOIN
-         sys.index_columns ic ON  ind.object_id = ic.object_id and ind.index_id = ic.index_id
-    INNER JOIN
-         sys.columns col ON ic.object_id = col.object_id and ic.column_id = col.column_id
-    INNER JOIN
-         sys.tables t ON ind.object_id = t.object_id
-    INNER JOIN
-         sys.schemas s on s.schema_id=t.schema_id
-    WHERE
-         t.is_ms_shipped = 0 and s.name in (${schema})
-    ORDER BY
-         t.name, ind.name, ind.index_id, ic.key_ordinal;`)).recordset;
-            response.push(...resp);
-        }
+        }[] = [];
+        await Promise.all(
+            dbNames.split(",").map(async dbName => {
+                await this.UseDB(dbName);
+                const resp: {
+                    TableName: string;
+                    IndexName: string;
+                    ColumnName: string;
+                    is_unique: boolean;
+                    is_primary_key: boolean;
+                }[] = (
+                    await request.query(`SELECT
+             TableName = t.name,
+             IndexName = ind.name,
+             ColumnName = col.name,
+             ind.is_unique,
+             ind.is_primary_key
+        FROM
+             sys.indexes ind
+        INNER JOIN
+             sys.index_columns ic ON  ind.object_id = ic.object_id and ind.index_id = ic.index_id
+        INNER JOIN
+             sys.columns col ON ic.object_id = col.object_id and ic.column_id = col.column_id
+        INNER JOIN
+             sys.tables t ON ind.object_id = t.object_id
+        INNER JOIN
+             sys.schemas s on s.schema_id=t.schema_id
+        WHERE
+             t.is_ms_shipped = 0 and s.name in (${schema})
+        ORDER BY
+             t.name, ind.name, ind.index_id, ic.key_ordinal;`)
+                ).recordset;
+                response.push(...resp);
+            })
+        );
+
         entities.forEach(ent => {
-            response
-                .filter(filterVal => filterVal.TableName === ent.tsEntityName)
-                .forEach(resp => {
-                    let indexInfo: IndexInfo = {} as IndexInfo;
-                    const indexColumnInfo: IndexColumnInfo = {} as IndexColumnInfo;
-                    if (
-                        ent.Indexes.filter(filterVal => {
-                            return filterVal.name === resp.IndexName;
-                        }).length > 0
-                    ) {
-                        indexInfo = ent.Indexes.filter(filterVal => {
-                            return filterVal.name === resp.IndexName;
-                        })[0];
-                    } else {
-                        indexInfo.columns = [] as IndexColumnInfo[];
-                        indexInfo.name = resp.IndexName;
-                        indexInfo.isUnique = resp.is_unique;
-                        indexInfo.isPrimaryKey = resp.is_primary_key;
-                        ent.Indexes.push(indexInfo);
-                    }
-                    indexColumnInfo.name = resp.ColumnName;
-                    indexInfo.columns.push(indexColumnInfo);
+            const entityIndices = response.filter(
+                filterVal => filterVal.TableName === ent.tscName
+            );
+            const indexNames = new Set(entityIndices.map(v => v.IndexName));
+            indexNames.forEach(indexName => {
+                const records = entityIndices.filter(
+                    v => v.IndexName === indexName
+                );
+                const indexInfo: Index = {
+                    columns: [],
+                    options: {},
+                    name: records[0].IndexName
+                };
+                if (records[0].is_primary_key) indexInfo.primary = true;
+                if (records[0].is_unique) indexInfo.options.unique = true;
+                records.forEach(record => {
+                    indexInfo.columns.push(record.ColumnName);
                 });
+                ent.indices.push(indexInfo);
+            });
         });
 
         return entities;
     }
+
     public async GetRelations(
-        entities: EntityInfo[],
+        entities: Entity[],
         schema: string,
-        dbNames: string
-    ): Promise<EntityInfo[]> {
+        dbNames: string,
+        generationOptions: IGenerationOptions
+    ): Promise<Entity[]> {
         const request = new MSSQL.Request(this.Connection);
-        const response: Array<{
+        const response: {
             TableWithForeignKey: string;
             FK_PartNo: number;
             ForeignKeyColumn: string;
@@ -307,98 +333,117 @@ WHERE TABLE_TYPE='BASE TABLE' and TABLE_SCHEMA in (${schema}) AND TABLE_CATALOG 
             ForeignKeyColumnReferenced: string;
             onDelete: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
             onUpdate: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
-            object_id: number;
-        }> = [];
-        for (const dbName of dbNames.split(",")) {
-            await this.UseDB(dbName);
-            const resp: Array<{
-                TableWithForeignKey: string;
-                FK_PartNo: number;
-                ForeignKeyColumn: string;
-                TableReferenced: string;
-                ForeignKeyColumnReferenced: string;
-                onDelete: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
-                onUpdate: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
-                object_id: number;
-            }> = (await request.query(`select
-    parentTable.name as TableWithForeignKey,
-    fkc.constraint_column_id as FK_PartNo,
-     parentColumn.name as ForeignKeyColumn,
-     referencedTable.name as TableReferenced,
-     referencedColumn.name as ForeignKeyColumnReferenced,
-     fk.delete_referential_action_desc as onDelete,
-     fk.update_referential_action_desc as onUpdate,
-     fk.object_id
-from
-    sys.foreign_keys fk
-inner join
-    sys.foreign_key_columns as fkc on fkc.constraint_object_id=fk.object_id
-inner join
-    sys.tables as parentTable on fkc.parent_object_id = parentTable.object_id
-inner join
-    sys.columns as parentColumn on fkc.parent_object_id = parentColumn.object_id and fkc.parent_column_id = parentColumn.column_id
-inner join
-    sys.tables as referencedTable on fkc.referenced_object_id = referencedTable.object_id
-inner join
-    sys.columns as referencedColumn on fkc.referenced_object_id = referencedColumn.object_id and fkc.referenced_column_id = referencedColumn.column_id
-inner join
-	sys.schemas as parentSchema on parentSchema.schema_id=parentTable.schema_id
-where
-    fk.is_disabled=0 and fk.is_ms_shipped=0 and parentSchema.name in (${schema})
-order by
-    TableWithForeignKey, FK_PartNo`)).recordset;
-            response.push(...resp);
-        }
-        const relationsTemp: IRelationTempInfo[] = [] as IRelationTempInfo[];
-        response.forEach(resp => {
-            let rels = relationsTemp.find(
-                val => val.object_id === resp.object_id
-            );
-            if (rels === undefined) {
-                rels = {} as IRelationTempInfo;
-                rels.ownerColumnsNames = [];
-                rels.referencedColumnsNames = [];
-                switch (resp.onDelete) {
-                    case "NO_ACTION":
-                        rels.actionOnDelete = null;
-                        break;
-                    case "SET_NULL":
-                        rels.actionOnDelete = "SET NULL";
-                        break;
-                    default:
-                        rels.actionOnDelete = resp.onDelete;
-                        break;
-                }
-                switch (resp.onUpdate) {
-                    case "NO_ACTION":
-                        rels.actionOnUpdate = null;
-                        break;
-                    case "SET_NULL":
-                        rels.actionOnUpdate = "SET NULL";
-                        break;
-                    default:
-                        rels.actionOnUpdate = resp.onUpdate;
-                        break;
-                }
-                rels.object_id = resp.object_id;
-                rels.ownerTable = resp.TableWithForeignKey;
-                rels.referencedTable = resp.TableReferenced;
-                relationsTemp.push(rels);
-            }
-            rels.ownerColumnsNames.push(resp.ForeignKeyColumn);
-            rels.referencedColumnsNames.push(resp.ForeignKeyColumnReferenced);
-        });
-        entities = this.GetRelationsFromRelationTempInfo(
-            relationsTemp,
-            entities
+            objectId: number;
+        }[] = [];
+        await Promise.all(
+            dbNames.split(",").map(async dbName => {
+                await this.UseDB(dbName);
+                const resp: {
+                    TableWithForeignKey: string;
+                    FK_PartNo: number;
+                    ForeignKeyColumn: string;
+                    TableReferenced: string;
+                    ForeignKeyColumnReferenced: string;
+                    onDelete: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
+                    onUpdate: "RESTRICT" | "CASCADE" | "SET_NULL" | "NO_ACTION";
+                    objectId: number;
+                }[] = (
+                    await request.query(`select
+            parentTable.name as TableWithForeignKey,
+            fkc.constraint_column_id as FK_PartNo,
+             parentColumn.name as ForeignKeyColumn,
+             referencedTable.name as TableReferenced,
+             referencedColumn.name as ForeignKeyColumnReferenced,
+             fk.delete_referential_action_desc as onDelete,
+             fk.update_referential_action_desc as onUpdate,
+             fk.object_id as objectId
+        from
+            sys.foreign_keys fk
+        inner join
+            sys.foreign_key_columns as fkc on fkc.constraint_object_id=fk.object_id
+        inner join
+            sys.tables as parentTable on fkc.parent_object_id = parentTable.object_id
+        inner join
+            sys.columns as parentColumn on fkc.parent_object_id = parentColumn.object_id and fkc.parent_column_id = parentColumn.column_id
+        inner join
+            sys.tables as referencedTable on fkc.referenced_object_id = referencedTable.object_id
+        inner join
+            sys.columns as referencedColumn on fkc.referenced_object_id = referencedColumn.object_id and fkc.referenced_column_id = referencedColumn.column_id
+        inner join
+        	sys.schemas as parentSchema on parentSchema.schema_id=parentTable.schema_id
+        where
+            fk.is_disabled=0 and fk.is_ms_shipped=0 and parentSchema.name in (${schema})
+        order by
+            TableWithForeignKey, FK_PartNo`)
+                ).recordset;
+                response.push(...resp);
+            })
         );
-        return entities;
+        const relationsTemp: RelationInternal[] = [] as RelationInternal[];
+        const relationKeys = new Set(response.map(v => v.objectId));
+
+        relationKeys.forEach(relationId => {
+            const rows = response.filter(v => v.objectId === relationId);
+            const ownerTable = entities.find(
+                v => v.sqlName === rows[0].TableWithForeignKey
+            );
+            const relatedTable = entities.find(
+                v => v.sqlName === rows[0].TableReferenced
+            );
+            if (!ownerTable || !relatedTable) {
+                TomgUtils.LogError(
+                    `Relation between tables ${rows[0].TableWithForeignKey} and ${rows[0].TableReferenced} wasn't found in entity model.`,
+                    true
+                );
+                return;
+            }
+            const internal: RelationInternal = {
+                ownerColumns: [],
+                relatedColumns: [],
+                ownerTable,
+                relatedTable
+            };
+            switch (rows[0].onDelete) {
+                case "NO_ACTION":
+                    break;
+                case "SET_NULL":
+                    internal.onDelete = "SET NULL";
+                    break;
+                default:
+                    internal.onDelete = rows[0].onDelete;
+                    break;
+            }
+            switch (rows[0].onUpdate) {
+                case "NO_ACTION":
+                    break;
+                case "SET_NULL":
+                    internal.onUpdate = "SET NULL";
+                    break;
+                default:
+                    internal.onUpdate = rows[0].onUpdate;
+                    break;
+            }
+            rows.forEach(row => {
+                internal.ownerColumns.push(row.ForeignKeyColumn);
+                internal.relatedColumns.push(row.ForeignKeyColumnReferenced);
+            });
+            relationsTemp.push(internal);
+        });
+
+        const retVal = MssqlDriver.GetRelationsFromRelationTempInfo(
+            relationsTemp,
+            entities,
+            generationOptions
+        );
+        return retVal;
     }
+
     public async DisconnectFromServer() {
         if (this.Connection) {
             await this.Connection.close();
         }
     }
+
     public async ConnectToServer(connectionOptons: IConnectionOptions) {
         const databaseName = connectionOptons.databaseName.split(",")[0];
         const config: MSSQL.config = {
@@ -409,6 +454,7 @@ order by
             },
             password: connectionOptons.password,
             port: connectionOptons.port,
+            requestTimeout: 60 * 60 * 1000,
             server: connectionOptons.host,
             user: connectionOptons.user
         };
@@ -430,18 +476,22 @@ order by
 
         await promise;
     }
+
     public async CreateDB(dbName: string) {
         const request = new MSSQL.Request(this.Connection);
         await request.query(`CREATE DATABASE ${dbName}; `);
     }
+
     public async UseDB(dbName: string) {
         const request = new MSSQL.Request(this.Connection);
         await request.query(`USE ${dbName}; `);
     }
+
     public async DropDB(dbName: string) {
         const request = new MSSQL.Request(this.Connection);
         await request.query(`DROP DATABASE ${dbName}; `);
     }
+
     public async CheckIfDBExists(dbName: string): Promise<boolean> {
         const request = new MSSQL.Request(this.Connection);
         const resp = await request.query(
@@ -449,16 +499,20 @@ order by
         );
         return resp.recordset.length > 0;
     }
-    private ReturnDefaultValueFunction(defVal: string | null): string | null {
-        if (!defVal) {
-            return null;
+
+    private static ReturnDefaultValueFunction(
+        defVal: string | null
+    ): string | undefined {
+        let defaultValue = defVal;
+        if (!defaultValue) {
+            return undefined;
         }
-        if (defVal.startsWith("(") && defVal.endsWith(")")) {
-            defVal = defVal.slice(1, -1);
+        if (defaultValue.startsWith("(") && defaultValue.endsWith(")")) {
+            defaultValue = defaultValue.slice(1, -1);
         }
-        if (defVal.startsWith(`'`)) {
-            return `() => "${defVal}"`;
+        if (defaultValue.startsWith(`'`)) {
+            return `() => "${defaultValue}"`;
         }
-        return `() => "${defVal}"`;
+        return `() => "${defaultValue}"`;
     }
 }

@@ -16,11 +16,12 @@ docker-compose-without-login.yml
 gulpfile.js
 !src/
 src/*
-!src/*.mst
 test/
 .travis.yml
 codecov.yml
 tsconfig.json
 typings.json
 dist/test/
-src/tslint.json
+.eslintrc.js
+.eslintignore
+.tomg-config

@@ -2,7 +2,6 @@ import { Entity, PrimaryColumn, Column } from "typeorm";
 
 @Entity("PostArrays")
 export class PostArrays {
-
     @PrimaryColumn()
     id: number;
 
@@ -82,7 +81,7 @@ export class PostArrays {
     varbit: string[];
 
     @Column("bit varying", { array: true })
-    bit_varying: string[];
+    bitVarying: string[];
 
     @Column("timetz", { array: true })
     timetz: string[];
@@ -97,7 +96,7 @@ export class PostArrays {
     // timestamp_without_time_zone: Date[];
 
     @Column("timestamp with time zone", { array: true })
-    timestamp_with_time_zone: Date[];
+    timestampWithTimeZone: Date[];
 
     @Column("date", { array: true })
     date: string[];
@@ -105,10 +104,10 @@ export class PostArrays {
     @Column("time", { array: true })
     time: string[];
     @Column("time without time zone", { array: true })
-    time_without_time_zone: string[];
+    timeWithoutTimeZone: string[];
 
     @Column("time with time zone", { array: true })
-    time_with_time_zone: string[];
+    timeWithTimeZone: string[];
 
     @Column("interval", { array: true })
     interval: any[];
@@ -123,7 +122,7 @@ export class PostArrays {
     // enum: string[];
 
     @Column("point", { array: true })
-    point: string[] | Object[];
+    point: string[] | object[];
 
     @Column("line", { array: true })
     line: string[];
@@ -132,7 +131,7 @@ export class PostArrays {
     lseg: string[] | string[][];
 
     @Column("box", { array: true })
-    box: string[] | Object[];
+    box: string[] | object[];
 
     @Column("path", { array: true })
     path: string[];
@@ -141,7 +140,7 @@ export class PostArrays {
     polygon: string[];
 
     @Column("circle", { array: true })
-    circle: string[] | Object[];
+    circle: string[] | object[];
 
     @Column("cidr", { array: true })
     cidr: string[];
@@ -165,10 +164,10 @@ export class PostArrays {
     xml: string[];
 
     @Column("json", { array: true })
-    json: Object[];
+    json: object[];
 
     @Column("jsonb", { array: true })
-    jsonb: Object[];
+    jsonb: object[];
 
     @Column("int4range", { array: true })
     int4range: string[];
@@ -187,5 +186,4 @@ export class PostArrays {
 
     @Column("daterange", { array: true })
     daterange: string[];
-
 }

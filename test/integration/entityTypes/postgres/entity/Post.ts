@@ -2,7 +2,6 @@ import { Entity, PrimaryColumn, Column } from "typeorm";
 
 @Entity("Post")
 export class Post {
-
     @PrimaryColumn()
     id: number;
 
@@ -82,7 +81,7 @@ export class Post {
     varbit: string;
 
     @Column("bit varying")
-    bit_varying: string;
+    bitVarying: string;
 
     @Column("timetz")
     timetz: string;
@@ -94,10 +93,10 @@ export class Post {
     timestamp: Date;
 
     @Column("timestamp without time zone")
-    timestamp_without_time_zone: Date;
+    timestampWithoutTimeZone: Date;
 
     @Column("timestamp with time zone")
-    timestamp_with_time_zone: Date;
+    timestampWithTimeZone: Date;
 
     @Column("date")
     date: string;
@@ -105,10 +104,10 @@ export class Post {
     @Column("time")
     time: string;
     @Column("time without time zone")
-    time_without_time_zone: string;
+    timeWithoutTimeZone: string;
 
     @Column("time with time zone")
-    time_with_time_zone: string;
+    timeWithTimeZone: string;
 
     @Column("interval")
     interval: any;
@@ -119,11 +118,11 @@ export class Post {
     @Column("boolean")
     boolean: boolean;
 
-    // @Column("enum")
-    // enum: string;
+    @Column("enum", { enum: ["A", "B", "C"] })
+    enum: "A" | "B" | "C";
 
     @Column("point")
-    point: string | Object;
+    point: string | object;
 
     @Column("line")
     line: string;
@@ -132,7 +131,7 @@ export class Post {
     lseg: string | string[];
 
     @Column("box")
-    box: string | Object;
+    box: string | object;
 
     @Column("path")
     path: string;
@@ -141,7 +140,7 @@ export class Post {
     polygon: string;
 
     @Column("circle")
-    circle: string | Object;
+    circle: string | object;
 
     @Column("cidr")
     cidr: string;
@@ -165,10 +164,10 @@ export class Post {
     xml: string;
 
     @Column("json")
-    json: Object;
+    json: object;
 
     @Column("jsonb")
-    jsonb: Object;
+    jsonb: object;
 
     @Column("int4range")
     int4range: string;
@@ -188,4 +187,6 @@ export class Post {
     @Column("daterange")
     daterange: string;
 
+    @Column("geography")
+    geography: string;
 }

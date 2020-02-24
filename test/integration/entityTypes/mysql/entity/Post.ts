@@ -2,7 +2,6 @@ import { Entity, PrimaryColumn, Column } from "typeorm";
 
 @Entity("Post")
 export class Post {
-
     @PrimaryColumn()
     id: number;
 
@@ -15,10 +14,13 @@ export class Post {
     @Column("int")
     int: number;
 
+    @Column("int", { unsigned: true })
+    uint: number;
+
     @Column("tinyint")
     tinyint: number;
 
-    @Column("tinyint",{width:1})
+    @Column("tinyint", { width: 1 })
     boolean: boolean;
 
     @Column("smallint")
@@ -85,10 +87,10 @@ export class Post {
     longtext: string;
 
     @Column("enum", { enum: ["A", "B", "C"] })
-    enum: string;
+    enum: "A" | "B" | "C";
 
     @Column("json")
-    json: Object;
+    json: object;
 
     @Column("binary")
     binary: Buffer;
@@ -116,4 +118,10 @@ export class Post {
 
     @Column("geometrycollection")
     geometrycollection: string;
+
+    @Column("set", {
+        enum: ["A", "B", "C"],
+        default: ["A", "B"]
+    })
+    roles: ("A" | "B" | "C")[]
 }
