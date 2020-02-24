@@ -66,8 +66,15 @@ export function relationName(relation: Relation): string {
     return newColumnName;
 }
 
+// export function entityName(oldEntityName: string): string {
+//     return oldEntityName;
+// }
+
 export function entityName(oldEntityName: string): string {
-    return oldEntityName;
+    const pascalStyleName =
+        _(_(entityName).camelCase()).upperFirst() + "Entity";
+
+    return pascalStyleName;
 }
 
 export function columnName(oldColumnName: string): string {
